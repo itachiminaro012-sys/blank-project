@@ -3,6 +3,7 @@ package com.example.localmusicassistant
 import android.Manifest
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.net.Uri
@@ -14,9 +15,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
-import androidx.compose.foundation.Image
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,9 +44,10 @@ import androidx.compose.material3.icons.filled.SkipPrevious
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -54,12 +57,13 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.SpeechService
-import org.vosk.android.SpeechStreamService
 import java.io.File
 import java.util.Locale
 
@@ -78,18 +82,22 @@ class MainActivity : ComponentActivity() {
 
     // Vosk
     private var voskModel: Model? = null
-    private var recognizer: Recognizer? = null
-    private var speechService: SpeechService? = null
+    private var commandRecognizer: Recognizer? = null
+    private var commandService: SpeechService? = null
+    private var wakeRecognizer: Recognizer? = null
+    private var wakeService: SpeechService? = null
+    private var commandTimeoutJob: Job? = null
 
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { perms ->
-        // No-op; UI reflects availability
+    ) { _ ->
+        // Try to start wake word after permissions granted
+        if (ensureModelReady()) startWakeWord()
     }
 
-    private fun requestPermissions() {
+    fun requestPermissions() {
         val needed = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT &lt; 33) {
+        if (Build.VERSION.SDK_INT < 33) {
             needed += Manifest.permission.READ_EXTERNAL_STORAGE
         } else {
             needed += Manifest.permission.READ_MEDIA_AUDIO
@@ -99,6 +107,8 @@ class MainActivity : ComponentActivity() {
         }
         if (toAsk.isNotEmpty()) {
             audioPermissionLauncher.launch(toAsk.toTypedArray())
+        } else {
+            if (ensureModelReady()) startWakeWord()
         }
     }
 
@@ -114,22 +124,18 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.getDefault()
-                // Try to pick a pleasant female voice if available
                 try {
                     val engineVoices = tts?.voices?.filter { v ->
                         v.locale.language == Locale.getDefault().language
                     }.orEmpty()
-
                     val preferred = engineVoices.firstOrNull { v ->
                         val name = v.name.lowercase()
                         name.contains("female") || name.contains("fem") || name.contains("en-us-x") || name.contains("gb-")
                     } ?: engineVoices.firstOrNull()
-
                     preferred?.let { tts?.voice = it }
                     tts?.setPitch(1.05f)
                     tts?.setSpeechRate(1.0f)
                 } catch (_: Exception) {
-                    // Fall back silently if selection fails
                     tts?.setPitch(1.05f)
                     tts?.setSpeechRate(1.0f)
                 }
@@ -139,17 +145,20 @@ class MainActivity : ComponentActivity() {
         requestPermissions()
 
         setContent {
-            App(player = player,
-                onMicClick = { toggleListening() },
-                speak = { phrase -> speak(phrase) })
+            App(
+                player = player,
+                onMicClick = { toggleCommandListening() },
+                speak = { phrase -> speak(phrase) },
+                showModelHelp = { showModelHelp() },
+                hasModel = { hasModelInstalled() }
+            )
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        speechService?.stop()
-        speechService = null
-        recognizer?.close()
+        stopWakeWord()
+        stopCommandListening()
         voskModel?.close()
         player.release()
         tts?.shutdown()
@@ -159,9 +168,12 @@ class MainActivity : ComponentActivity() {
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tts-utterance")
     }
 
+    private fun hasModelInstalled(): Boolean {
+        val modelDir = File(filesDir, "model")
+        return modelDir.exists()
+    }
+
     private fun ensureModelReady(): Boolean {
-        // Expect a Vosk model directory called "model" in the app's files dir
-        // e.g., filesDir/model containing conf/model.conf, etc.
         val modelDir = File(filesDir, "model")
         if (!modelDir.exists()) return false
         return try {
@@ -169,36 +181,95 @@ class MainActivity : ComponentActivity() {
                 voskModel = Model(modelDir.absolutePath)
             }
             true
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
     }
 
-    private fun toggleListening() {
-        if (speechService != null) {
-            speechService?.stop()
-            speechService = null
-            speak("Stopped listening")
-            return
-        }
-        if (!ensureModelReady()) {
-            speak("Speech model not found. See the README to install the Vosk model.")
-            return
-        }
+    private fun startWakeWord() {
+        if (wakeService != null) return
+        if (!ensureModelReady()) return
         try {
-            recognizer = Recognizer(voskModel, 16000.0f)
-            speechService = SpeechService(recognizer, 16000.0f)
-            speechService?.startListening { resultJson ->
+            // Restrict grammar to a single wake phrase for robustness
+            wakeRecognizer = Recognizer(voskModel, 16000.0f, "[\"hey music\"]")
+            wakeService = SpeechService(wakeRecognizer, 16000.0f)
+            wakeService?.startListening { json ->
+                val text = Regex(""""text"\s*:\s*"([^"]*)"""").find(json)?.groupValues?.getOrNull(1)
+                    ?.lowercase(Locale.getDefault()) ?: ""
+                if (text.contains("hey music")) {
+                    runOnUiThread {
+                        stopWakeWord()
+                        speak("Yes?")
+                        startCommandListening(withTimeoutMs = 10000L)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // ignore
+        }
+    }
+
+    private fun stopWakeWord() {
+        wakeService?.stop()
+        wakeService = null
+        wakeRecognizer?.close()
+        wakeRecognizer = null
+    }
+
+    private fun startCommandListening(withTimeoutMs: Long? = null) {
+        if (!ensureModelReady()) {
+            speak("Speech model not found. See the help prompt to install the model.")
+            return
+        }
+        stopCommandListening()
+        try {
+            commandRecognizer = Recognizer(voskModel, 16000.0f)
+            commandService = SpeechService(commandRecognizer, 16000.0f)
+            commandService?.startListening { resultJson ->
                 handleRecognitionResult(resultJson)
             }
             speak("Listening")
-        } catch (e: Exception) {
+            commandTimeoutJob?.cancel()
+            if (withTimeoutMs != null) {
+                commandTimeoutJob = lifecycleScope.launch {
+                    delay(withTimeoutMs)
+                    stopCommandListening()
+                    startWakeWord()
+                }
+            }
+        } catch (_: Exception) {
             speak("Failed to start listening")
         }
     }
 
+    private fun stopCommandListening() {
+        commandTimeoutJob?.cancel()
+        commandTimeoutJob = null
+        commandService?.stop()
+        commandService = null
+        commandRecognizer?.close()
+        commandRecognizer = null
+    }
+
+    private fun toggleCommandListening() {
+        if (commandService != null) {
+            stopCommandListening()
+            speak("Stopped listening")
+            startWakeWord()
+        } else {
+            // Temporarily stop wake service while actively listening
+            stopWakeWord()
+            startCommandListening()
+        }
+    }
+
+    private fun showModelHelp() {
+        // Open model site in browser
+        val url = "https://alphacephei.com/vosk/models"
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
     private fun handleRecognitionResult(resultJson: String) {
-        // Vosk returns JSON like: {"text": "play music"}
         val text = Regex(""""text"\s*:\s*"([^"]*)"""").find(resultJson)?.groupValues?.getOrNull(1)
             ?.lowercase(Locale.getDefault())
             ?: return
@@ -210,7 +281,7 @@ class MainActivity : ComponentActivity() {
                     player.pause()
                     speak("Paused")
                 }
-                text.contains("resume") || text.contains("continue") || text.contains("play") &amp;&amp; player.playWhenReady == false &amp;&amp; player.currentMediaItem != null -> {
+                (text.contains("resume") || text.contains("continue") || text.contains("play")) && player.playWhenReady == false && player.currentMediaItem != null -> {
                     player.play()
                     speak("Resumed")
                 }
@@ -252,6 +323,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            // After handling a command when invoked by wake word, return to wake state
+            if (wakeService == null) {
+                // give small delay to avoid overlapping audio focus
+                lifecycleScope.launch {
+                    delay(300)
+                    if (commandService != null) {
+                        stopCommandListening()
+                    }
+                    startWakeWord()
+                }
+            }
         }
     }
 
@@ -279,7 +361,7 @@ class MainActivity : ComponentActivity() {
             val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
 
             val songs = mutableListOf<Song>()
-            val collection = if (Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.Q) {
+            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
             } else {
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
@@ -324,17 +406,27 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(UnstableApi::class)
 @Composable
-fun App(player: ExoPlayer, onMicClick: () -&gt; Unit, speak: (String) -&gt; Unit) {
+fun App(
+    player: ExoPlayer,
+    onMicClick: () -> Unit,
+    speak: (String) -> Unit,
+    showModelHelp: () -> Unit,
+    hasModel: () -> Boolean
+) {
     val context = LocalContext.current
     var songs by remember { mutableStateOf(listOf<Song>()) }
     var hasPermission by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
     var currentTitle by remember { mutableStateOf("—") }
     var currentArtist by remember { mutableStateOf("—") }
+    var showFirstRunDialog by remember { mutableStateOf(false) }
+    var micPressed by remember { mutableStateOf(false) }
+    val micScale by animateFloatAsState(targetValue = if (micPressed) 0.9f else 1.0f, label = "micScale")
 
     LaunchedEffect(Unit) {
         hasPermission = checkAllPermissions(context)
         if (hasPermission) {
+            if (!hasModel()) showFirstRunDialog = true
             songs = (context as MainActivity).querySongs(context)
             if (songs.isNotEmpty()) {
                 (context as MainActivity).setPlaylistAndPlay(songs)
@@ -391,7 +483,17 @@ fun App(player: ExoPlayer, onMicClick: () -&gt; Unit, speak: (String) -&gt; Unit
                     contentDescription = "Microphone",
                     modifier = Modifier
                         .size(96.dp)
-                        .clickable { onMicClick() }
+                        .scale(micScale)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = {
+                                    micPressed = true
+                                    tryAwaitRelease()
+                                    micPressed = false
+                                    onMicClick()
+                                }
+                            )
+                        }
                         .padding(8.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
@@ -399,7 +501,10 @@ fun App(player: ExoPlayer, onMicClick: () -&gt; Unit, speak: (String) -&gt; Unit
 
             Row(
                 horizontalArrangement = Arrangement.SpaceEvenly,
-                modifier = Modifier.fillMaxSize().padding(top = 0.dp).weight(1f, fill = false)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 0.dp)
+                    .weight(1f, fill = false)
             ) {
                 IconButton(onClick = { player.seekToPreviousMediaItem() }) {
                     Icon(Icons.Default.SkipPrevious, contentDescription = "Previous")
@@ -430,6 +535,34 @@ fun App(player: ExoPlayer, onMicClick: () -&gt; Unit, speak: (String) -&gt; Unit
                 }
             }
         }
+
+        if (showFirstRunDialog) {
+            AlertDialog(
+                onDismissRequest = { showFirstRunDialog = false },
+                title = { Text("Install speech model") },
+                text = {
+                    Text(
+                        "To use offline voice commands, download a Vosk English model (e.g., 'vosk-model-small-en-us-0.15'), unzip it, rename the folder to 'model' and place it at:\n\n" +
+                                "/sdcard/Android/data/com.example.localmusicassistant/files/model\n\n" +
+                                "Then return to the app. You can open the model page now."
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        showModelHelp()
+                    }) { Text("Open model page") }
+                },
+                dismissButton = {
+                    Row {
+                        Button(onClick = { showFirstRunDialog = false }) { Text("Skip") }
+                        Spacer(Modifier.size(8.dp))
+                        Button(onClick = {
+                            showFirstRunDialog = !hasModel()
+                        }) { Text("I placed it") }
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -438,7 +571,7 @@ private fun checkAllPermissions(context: Context): Boolean {
         context,
         Manifest.permission.RECORD_AUDIO
     ) == PackageManager.PERMISSION_GRANTED
-    val storageGranted = if (Build.VERSION.SDK_INT &lt; 33) {
+    val storageGranted = if (Build.VERSION.SDK_INT < 33) {
         ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.READ_EXTERNAL_STORAGE
@@ -449,5 +582,7 @@ private fun checkAllPermissions(context: Context): Boolean {
             Manifest.permission.READ_MEDIA_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
     }
+    return audioGranted && storageGranted
+}
     return audioGranted &amp;&amp; storageGranted
 }
