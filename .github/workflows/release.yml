@@ -21,6 +21,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          build-tools: 34.0.0
+
       - name: Build Debug APK (no wrapper)
         uses: gradle/gradle-build-action@v3
         with:
