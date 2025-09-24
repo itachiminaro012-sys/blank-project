@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Local Voice-Controlled Music Assistant — APK</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{
+      --bg:#0f1115;
+      --card:#171a21;
+      --text:#e6eaf2;
+      --muted:#9aa3b2;
+      --accent:#4f7cff;
+      --accent2:#9b59b6;
+      --ok:#22c55e;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background: radial-gradient(1200px 600px at 0% 0%, #141824 0%, #0f1115 70%);
+      color:var(--text);
+    }
+    .wrap{max-width:960px;margin:0 auto;padding:40px 24px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{
+      width:40px;height:40px;border-radius:12px;
+      background: conic-gradient(from 210deg,#4f7cff, #9b59b6,#4f7cff);
+      box-shadow: 0 8px 24px rgba(79,124,255,.35);
+    }
+    .title h1{margin:0;font-size:22px}
+    .title p{margin:4px 0 0;font-size:13px;color:var(--muted)}
+    .card{
+      background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:16px;
+      padding:20px;
+      backdrop-filter:saturate(140%) blur(8px);
+      box-shadow: 0 8px 40px rgba(0,0,0,.35);
+    }
+    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:20px}
+    @media (max-width:880px){.grid{grid-template-columns:1fr}}
+    h2{margin:0 0 12px;font-size:18px}
+    ul{margin:0;padding-left:18px;color:var(--muted)}
+    .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}
+    a.btn, button.btn{
+      display:inline-flex;align-items:center;gap:10px;
+      padding:12px 16px;border-radius:12px;border:1px solid rgba(255,255,255,.12);
+      color:var(--text);text-decoration:none;background:#1b1f29;cursor:pointer;
+      transition:transform .06s ease, box-shadow .2s ease, background .2s ease;
+    }
+    a.btn:hover, button.btn:hover{transform:translateY(-1px);box-shadow:0 10px 18px rgba(79,124,255,.18)}
+    .primary{background:linear-gradient(180deg, rgba(79,124,255,.35), rgba(79,124,255,.15));border-color:rgba(79,124,255,.4)}
+    .secondary{background:linear-gradient(180deg, rgba(155,89,182,.35), rgba(155,89,182,.15));border-color:rgba(155,89,182,.4)}
+    .muted{opacity:.7}
+    .status{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+    .status .dot{width:8px;height:8px;border-radius:50%;background:#f59e0b}
+    .status.ready .dot{background:var(--ok)}
+    .preview{
+      display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px
+    }
+    .shot{
+      border-radius:12px;background:#12151c;border:1px solid rgba(255,255,255,.06);
+      aspect-ratio:9/19;display:flex;align-items:center;justify-content:center;color:var(--muted);
+    }
+    footer{margin-top:28px;color:var(--muted);font-size:13px}
+    code{background:#11151d;border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:2px 6px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div class="title">
+          <h1>Local Voice-Controlled Music Assistant</h1>
+          <p>Offline voice control + Jetpack Compose UI</p>
+        </div>
+      </div>
+      <div class="status" id="apkStatus">
+        <span class="dot"></span>
+        <span>APK pending upload</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Download</h2>
+        <p class="muted">The APK will be attached here when available.</p>
+        <div class="actions">
+          <a class="btn primary" id="downloadBtn" href="#" aria-disabled="true">Download APK</a>
+          <a class="btn secondary" href="../README.md">Project README</a>
+        </div>
+        <div style="margin-top:14px;color:var(--muted);font-size:13px">
+          To generate the APK via CI, push the repo to GitHub. The workflow at <code>.github/workflows/android.yml</code> builds
+          <code>app-debug.apk</code>. We can then attach it here for direct download.
+        </div>
+
+        <h2 style="margin-top:18px">Design Preview</h2>
+        <div class="preview">
+          <div class="shot">Mic press animation</div>
+          <div class="shot">Playback controls</div>
+        </div>
+      </section>
+
+      <aside class="card">
+        <h2>Features</h2>
+        <ul>
+          <li>Offline voice commands with wake word “Hey Music”</li>
+          <li>Local playback via Media3 ExoPlayer</li>
+          <li>Jetpack Compose + Material 3 UI</li>
+          <li>Play/Pause/Next/Previous, Shuffle/Repeat</li>
+          <li>TextToSpeech voice feedback</li>
+        </ul>
+
+        <h2 style="margin-top:16px">Getting the APK here</h2>
+        <ul>
+          <li>Option A: Provide the built <code>app-debug.apk</code> and I’ll attach it now.</li>
+          <li>Option B: Let me push this repo to GitHub and the Actions workflow will produce the APK automatically.</li>
+        </ul>
+      </aside>
+    </div>
+
+    <footer>
+      Need the APK uploaded? Reply with either the file or permission to push to GitHub and I’ll wire it up here.
+    </footer>
+  </div>
+
+  <script>
+    // If we later place app-debug.apk in this folder, the page will auto-enable the download.
+    (function(){
+      fetch('app-debug.apk', {method:'HEAD'}).then(r=>{
+        if(r.ok){
+          document.getElementById('downloadBtn').href = 'app-debug.apk';
+          document.getElementById('downloadBtn').setAttribute('aria-disabled','false');
+          document.getElementById('apkStatus').classList.add('ready');
+          document.getElementById('apkStatus').innerHTML = '<span class="dot"></span><span>APK ready</span>';
+        }
+      }).catch(()=>{});
+    })();
+  </script>
+</body>
+</html>
