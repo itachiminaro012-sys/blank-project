@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Gradient-like effect using two overlapping paths -->
+    <path
+        android:fillColor="#FF5B8CFF"
+        android:pathData="M62,14 L78,14 C80,14 82,16 82,18 L82,64 C82,72 76,78 68,80 C60,82 52,78 50,70 C48,62 54,54 62,52 C66,51 70,51 74,52 L74,34 L62,34 C60,34 58,32 58,30 L58,18 C58,16 60,14 62,14 Z" />
+    <path
+        android:fillColor="#FFFF5B8C"
+        android:fillAlpha="0.9"
+        android:pathData="M56,20 L72,20 C74,20 76,22 76,24 L76,60 C76,68 70,74 62,76 C54,78 46,74 44,66 C42,58 48,50 56,48 C60,47 64,47 68,48 L68,30 L56,30 C54,30 52,28 52,26 L52,24 C52,22 54,20 56,20 Z" />
+</vector>

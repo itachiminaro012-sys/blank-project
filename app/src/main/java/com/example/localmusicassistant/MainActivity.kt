@@ -112,9 +112,27 @@ class MainActivity : ComponentActivity() {
         player.shuffleModeEnabled = false
 
         tts = TextToSpeech(this) { status ->
-            // Initialize TTS language if available
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.getDefault()
+                // Try to pick a pleasant female voice if available
+                try {
+                    val engineVoices = tts?.voices?.filter { v ->
+                        v.locale.language == Locale.getDefault().language
+                    }.orEmpty()
+
+                    val preferred = engineVoices.firstOrNull { v ->
+                        val name = v.name.lowercase()
+                        name.contains("female") || name.contains("fem") || name.contains("en-us-x") || name.contains("gb-")
+                    } ?: engineVoices.firstOrNull()
+
+                    preferred?.let { tts?.voice = it }
+                    tts?.setPitch(1.05f)
+                    tts?.setSpeechRate(1.0f)
+                } catch (_: Exception) {
+                    // Fall back silently if selection fails
+                    tts?.setPitch(1.05f)
+                    tts?.setSpeechRate(1.0f)
+                }
             }
         }
 
